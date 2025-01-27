@@ -38,3 +38,6 @@ out/
 
 ### MAC ###
 .DS_Store
+
+### Redis ###
+dump.rdb
