@@ -1,4 +1,4 @@
-package org.c4marathon.global.util;
+package org.c4marathon.assignment.global.util;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;

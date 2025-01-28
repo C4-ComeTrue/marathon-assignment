@@ -1,4 +1,4 @@
-package org.c4marathon.global.entity;
+package org.c4marathon.assignment.global.entity;
 
 
 import jakarta.persistence.Column;
