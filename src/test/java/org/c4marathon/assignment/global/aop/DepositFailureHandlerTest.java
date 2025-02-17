@@ -1,19 +1,18 @@
 package org.c4marathon.assignment.global.aop;
 
-import static org.c4marathon.assignment.global.util.Const.*;
-import static org.mockito.Mockito.*;
+import static org.c4marathon.assignment.transaction.domain.TransactionStatus.*;
+import static org.mockito.BDDMockito.*;
 
 import org.aspectj.lang.JoinPoint;
 import org.c4marathon.assignment.account.service.AccountService;
-import org.junit.jupiter.api.BeforeEach;
+import org.c4marathon.assignment.transaction.domain.Transaction;
+import org.c4marathon.assignment.transaction.domain.repository.TransactionRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 @ActiveProfiles("test")
@@ -21,66 +20,50 @@ import org.springframework.test.context.ActiveProfiles;
 class DepositFailureHandlerTest {
 
 	@Mock
-	private RedisTemplate<String, String> redisTemplate;
-
-	@Mock
-	private ListOperations<String, String> listOperations;
-
-	@Mock
 	private AccountService accountService;
 
 	@Mock
-	private JoinPoint joinPoint;
+	private TransactionRepository transactionRepository;
 
 	@InjectMocks
 	private DepositFailureHandler depositFailureHandler;
 
-	@BeforeEach
-	void setUp() {
-		when(redisTemplate.opsForList()).thenReturn(listOperations);
-	}
-
-	@DisplayName("successDeposit에서 예외 발생 시 Redis List PENDING_DEPOSIT을 제거되고, FAILED_DEPOSIT에 추가된다. ")
+	@DisplayName("successDeposit()에서 예외 발생 시 상태를 FAILED_DEPOSIT으로 변경하고 저장한다.")
 	@Test
-	void handleDepositFailure() {
-
+	void handleDepositFailure_ShouldUpdateStatusToFailedDeposit() {
 		// given
-		String deposit = "tx1:1:2:1000";
-		when(joinPoint.getArgs()).thenReturn(new Object[] {deposit});
-		// when
-		depositFailureHandler.handleDepositFailure(joinPoint, new RuntimeException("예외 발생"));
+		Transaction transactional = mock(Transaction.class);
+		JoinPoint joinPoint = mock(JoinPoint.class);
 
-		// then
-
-		verify(listOperations, times(1)).remove(PENDING_DEPOSIT, 1, deposit);
-		verify(listOperations, times(1)).rightPush(FAILED_DEPOSIT, deposit);
-	}
-
-	@DisplayName("failedDeposit에서 예외 발생 시 rollbackWithdraw가 호출된다.")
-	@Test
-	void handleFailedDepositFailure_callsRollbackWithdraw() {
-		// given
-		String failedDeposit = "tx2:1:2:1000";
-		when(joinPoint.getArgs()).thenReturn(new Object[] {failedDeposit});
+		given(joinPoint.getArgs()).willReturn(new Object[]{transactional});
 
 		// when
-		depositFailureHandler.handleFailedDepositFailure(joinPoint, new RuntimeException("예외 발생"));
+		depositFailureHandler.handleDepositFailure(joinPoint, new RuntimeException("Deposit failed"));
 
 		// then
-		verify(accountService, times(1)).rollbackWithdraw(1L, 1000L);
+		verify(transactional).updateStatus(FAILED_DEPOSIT);
+		verify(transactionRepository, times(1)).save(transactional);
 	}
 
-	@DisplayName("failedDeposit에서 예외 발생 시 FAILED_DEPOSIT 리스트에서 삭제된다.")
+	@DisplayName("failedDeposit()에서 예외 발생 시 상태를 CANCEL로 변경하고 송금 취소한다.")
 	@Test
-	void handleFailedDepositFailure_removesFromFailedDepositList() {
+	void handleFailedDepositFailure_ShouldUpdateStatusToCancelAndRollbackWithdraw() {
 		// given
-		String failedDeposit = "tx3:1:2:1000";
-		when(joinPoint.getArgs()).thenReturn(new Object[] {failedDeposit});
+		Transaction transactional = mock(Transaction.class);
+		given(transactional.getSenderAccountId()).willReturn(100L);
+		given(transactional.getAmount()).willReturn(5000L);
+
+		JoinPoint joinPoint = mock(JoinPoint.class);
+
+		given(joinPoint.getArgs()).willReturn(new Object[]{transactional});
 
 		// when
 		depositFailureHandler.handleFailedDepositFailure(joinPoint, new RuntimeException("예외 발생"));
 
 		// then
-		verify(listOperations, times(1)).remove(FAILED_DEPOSIT, 1, failedDeposit);
+		verify(transactional).updateStatus(CANCEL);
+		verify(transactionRepository, times(1)).save(transactional);
+		verify(accountService, times(1)).rollbackWithdraw(100L, 5000L);
 	}
+
 }

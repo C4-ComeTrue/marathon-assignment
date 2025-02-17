@@ -1,5 +1,6 @@
 package org.c4marathon.assignment.account.presentation;
 
+import static org.c4marathon.assignment.transaction.domain.TransactionType.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -59,7 +60,7 @@ class AccountControllerTest extends ControllerTestSupport {
     @Test
     void withdraw() throws Exception {
         // given
-        WithdrawRequest request = new WithdrawRequest(1L, 5000L);
+        WithdrawRequest request = new WithdrawRequest(1L, 5000L, IMMEDIATE_TRANSFER);
 
         // when // then
         mockMvc.perform(
@@ -75,7 +76,7 @@ class AccountControllerTest extends ControllerTestSupport {
     @Test
     void withdrawWithNegativeAmount() throws Exception {
         // given
-        WithdrawRequest request = new WithdrawRequest(2L, -5000L); // 음수 금액
+        WithdrawRequest request = new WithdrawRequest(2L, -5000L, IMMEDIATE_TRANSFER); // 음수 금액
 
         // when // then
         mockMvc.perform(

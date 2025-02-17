@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.c4marathon.assignment.account.presentation.AccountController;
 import org.c4marathon.assignment.account.presentation.SavingAccountController;
 import org.c4marathon.assignment.account.service.AccountService;
+import org.c4marathon.assignment.account.service.DepositService;
 import org.c4marathon.assignment.account.service.SavingAccountService;
 import org.c4marathon.assignment.member.presentation.MemberController;
 import org.c4marathon.assignment.member.service.MemberService;
@@ -39,6 +40,9 @@ public class ControllerTestSupport {
 
     @MockBean
     protected SettlementService settlementService;
+
+    @MockBean
+    protected DepositService depositService;
 
     protected MockHttpSession session;
 

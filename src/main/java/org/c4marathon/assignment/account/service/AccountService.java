@@ -1,8 +1,11 @@
 package org.c4marathon.assignment.account.service;
 
 import static org.c4marathon.assignment.global.util.Const.*;
+import static org.c4marathon.assignment.transaction.domain.TransactionStatus.*;
+import static org.c4marathon.assignment.transaction.domain.TransactionStatus.PENDING_DEPOSIT;
+import static org.c4marathon.assignment.transaction.domain.TransactionType.*;
 
-import java.util.UUID;
+import java.time.LocalDateTime;
 
 import org.c4marathon.assignment.account.domain.Account;
 import org.c4marathon.assignment.account.domain.SavingAccount;
@@ -11,10 +14,15 @@ import org.c4marathon.assignment.account.domain.repository.SavingAccountReposito
 import org.c4marathon.assignment.account.dto.WithdrawRequest;
 import org.c4marathon.assignment.account.exception.DailyChargeLimitExceededException;
 import org.c4marathon.assignment.account.exception.NotFoundAccountException;
-import org.c4marathon.assignment.global.event.withdraw.WithdrawCompletedEvent;
+import org.c4marathon.assignment.global.event.transactional.TransactionCreateEvent;
 import org.c4marathon.assignment.member.domain.Member;
 import org.c4marathon.assignment.member.domain.repository.MemberRepository;
 import org.c4marathon.assignment.member.exception.NotFoundMemberException;
+import org.c4marathon.assignment.transaction.domain.Transaction;
+import org.c4marathon.assignment.transaction.domain.repository.TransactionRepository;
+import org.c4marathon.assignment.transaction.exception.InvalidTransactionStatusException;
+import org.c4marathon.assignment.transaction.exception.NotFoundTransactionException;
+import org.c4marathon.assignment.transaction.exception.UnauthorizedTransactionException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -27,7 +35,9 @@ import lombok.RequiredArgsConstructor;
 public class AccountService {
 	private final AccountRepository accountRepository;
 	private final MemberRepository memberRepository;
+	private final TransactionRepository transactionRepository;
 	private final SavingAccountRepository savingAccountRepository;
+
 	private final ApplicationEventPublisher eventPublisher;
 
 	@Transactional
@@ -82,7 +92,8 @@ public class AccountService {
 	}
 
 	/**
-	 * 출금 시 Redis List 에 출금 기록을 저장
+	 * 송금 시 송금 내역을 저장하는 이벤트 발행 후 커밋
+	 *
 	 * @param senderAccountId
 	 * @param request
 	 */
@@ -98,18 +109,71 @@ public class AccountService {
 		senderAccount.withdraw(request.money());
 		accountRepository.save(senderAccount);
 
-		String transactionId = UUID.randomUUID().toString();
-
-		eventPublisher.publishEvent(
-			new WithdrawCompletedEvent(
-				transactionId,
-				senderAccountId,
-				request.receiverAccountId(),
-				request.money()
-			)
-		);
+		if (request.type().equals(IMMEDIATE_TRANSFER)) {
+			eventPublisher.publishEvent(
+				new TransactionCreateEvent(
+					senderAccountId,
+					request.receiverAccountId(),
+					request.money(),
+					request.type(),
+					WITHDRAW,
+					LocalDateTime.now()
+				)
+			);
+		} else if (request.type().equals(PENDING_TRANSFER)) {
+			eventPublisher.publishEvent(
+				new TransactionCreateEvent(
+					senderAccountId,
+					request.receiverAccountId(),
+					request.money(),
+					request.type(),
+					PENDING_DEPOSIT,
+					LocalDateTime.now()
+				)
+			);
+		}
 	}
 
+	/**
+	 * 송금 취소 기능(사용자가 직접 취소 요청)
+	 * 취소하려는 송금 내역을 가져와 검증 후 송금을 취소함
+	 *
+	 * @param senderAccountId
+	 * @param transactionalId
+	 */
+	@Transactional(isolation = Isolation.READ_COMMITTED)
+	public void cancelWithdraw(Long senderAccountId, Long transactionalId) {
+		Transaction transaction = transactionRepository.findTransactionalByTransactionIdWithLock(transactionalId)
+			.orElseThrow(NotFoundTransactionException::new);
+
+		validationTransactional(senderAccountId, transaction);
+
+		Account senderAccount = accountRepository.findByIdWithLock(senderAccountId)
+			.orElseThrow(NotFoundAccountException::new);
+
+		senderAccount.deposit(transaction.getAmount());
+		transaction.updateStatus(CANCEL);
+	}
+
+	/**
+	 * 72시간이 지난 송금 내역을 취소하는 비즈니스 로직
+	 *
+	 * @param transaction
+	 */
+	public void cancelWithdrawByExpirationTime(Transaction transaction) {
+		Account senderAccount = accountRepository.findByIdWithLock(transaction.getSenderAccountId())
+			.orElseThrow(NotFoundAccountException::new);
+
+		senderAccount.deposit(transaction.getAmount());
+		transaction.updateStatus(CANCEL);
+	}
+
+	/**
+	 * 입금 재시도가 실패하면 송금 롤백을 하는 로직
+	 *
+	 * @param senderAccountId
+	 * @param money
+	 */
 	@Transactional(isolation = Isolation.READ_COMMITTED)
 	public void rollbackWithdraw(Long senderAccountId, long money) {
 		Account senderAccount = accountRepository.findByIdWithLock(senderAccountId)
@@ -121,6 +185,7 @@ public class AccountService {
 
 	/**
 	 * 송금할 때 메인 계좌에 잔액이 부족할 때 10,000원 단위로 충전하는 로직
+	 *
 	 * @param money
 	 * @param senderAccount
 	 */
@@ -134,6 +199,16 @@ public class AccountService {
 		}
 
 		senderAccount.deposit(chargeMoney);
+	}
+
+	private static void validationTransactional(Long senderAccountId, Transaction transaction) {
+		if (!transaction.getSenderAccountId().equals(senderAccountId)) {
+			throw new UnauthorizedTransactionException();
+		}
+
+		if (!transaction.getStatus().equals(PENDING_DEPOSIT)) {
+			throw new InvalidTransactionStatusException();
+		}
 	}
 
 }

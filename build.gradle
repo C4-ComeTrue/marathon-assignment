@@ -32,6 +32,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.security:spring-security-crypto:5.6.3'
 
+    //java mail
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+
     //apache_commons
     implementation 'org.apache.commons:commons-lang3:3.13.0'
     implementation 'org.apache.commons:commons-collections4:4.4'

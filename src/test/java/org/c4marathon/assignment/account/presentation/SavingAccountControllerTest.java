@@ -31,6 +31,4 @@ class SavingAccountControllerTest extends ControllerTestSupport {
                 )
                 .andExpect(status().isCreated());
     }
-
-
 }
